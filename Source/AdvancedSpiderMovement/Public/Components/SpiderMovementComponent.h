@@ -17,9 +17,6 @@ class ADVANCEDSPIDERMOVEMENT_API USpiderMovementComponent : public UFloatingPawn
 protected:
 #pragma region OverriddenFunctions
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-	/** Perform movement on an autonomous client */
-	virtual void PerformMovement(float DeltaTime);
-	// virtual void PhysWalking() override;
 #pragma endregion 
 
 private:	
@@ -28,11 +25,15 @@ private:
 	FHitResult DoLineTraceSingleByObject(const FVector& Start, const FVector& End, bool bShowDebugShape = false);
 #pragma endregion 
 #pragma region SpiderMovementCore
+	virtual void PerformMovement(float DeltaTime);
+	
 	bool TraceForSurfaces();
 	bool TraceForCurrentGround();
-	void ProcessSurfaceInfo();
 	bool CanClimbToWall() const;
 	bool DoesComponentExistInTracedSurfaces(const USceneComponent* ComponentToCheck);
+	void ProcessSurfaceInfo();
+
+	FRotator GetRotationAlignedToSurface(FVector SurfaceNormal);
 #pragma endregion
 #pragma region SpiderMovementCoreVars
 	TArray<FHitResult> SpiderSurfaceTracedResults;
@@ -40,6 +41,7 @@ private:
 	FVector CurrentSurfaceLocation;
 	FVector CurrentSurfaceNormal;
 	bool bWantToClimbWall;
+	bool bLockRotation;
 #pragma endregion 
 #pragma region SpiderMovementBPVars
 	
@@ -63,6 +65,9 @@ private:
 	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AdvancedSpiderMovement | Physics", meta = (AllowPrivateAccess = "true"))
 	float GravityFactor = 3.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AdvancedSpiderMovement | Debug", meta = (AllowPrivateAccess = "true"))
+	bool bDrawDebug = false;
 	
 	
 #pragma endregion 

@@ -2,9 +2,8 @@
 
 
 #include "Components/SpiderMovementComponent.h"
-
-#include "FrameTypes.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Utilities/TraceUtils.h"
 #include "Debug/DebugHelper.h"
 #include "Kismet/KismetMathLibrary.h"
 
@@ -14,63 +13,22 @@ void USpiderMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	PerformMovement(DeltaTime);
 }
-
-void USpiderMovementComponent::PerformMovement(float DeltaTime)
-{
-	TraceForSurfaces();
-	TraceForCurrentGround();
-	ProcessSurfaceInfo();
-	FVector newUp;
-	FVector newForward;
-	FVector newRight;
-	FVector NewLocation;
-	FRotator NewRotation;
-	if (TraceForCurrentGround())
-	{
-		NewLocation = GroundTraceResult.ImpactNormal  * -1.f * GravityFactor; // UKismetMathLibrary::GetDirectionUnitVector(UpdatedComponent->GetComponentLocation(), GroundTraceResult.Location);
-		newUp = GroundTraceResult.ImpactNormal;
-		newForward = newUp.Cross(UpdatedComponent->GetForwardVector().Cross(UpdatedComponent->GetUpVector()));
-		newRight = newUp.Cross(newForward);
-		NewRotation = UKismetMathLibrary::MakeRotationFromAxes(newForward, newRight, newUp);
-		//UKismetMathLibrary::MakeRotFromXZ(GetOwner()->GetActorForwardVector(), GroundTraceResult.ImpactNormal);
-		
-	}
-	if (CanClimbToWall())
-	{
-		// Todo - @hamza Use Input Vector to decide Interpolation Alpha
-		float ClimbAlpha = GetLastInputVector().Dot(UpdatedComponent->GetForwardVector());
-		NewLocation = 10.f * UKismetMathLibrary::GetDirectionUnitVector(UpdatedComponent->GetComponentLocation(), CurrentSurfaceLocation);
-		newUp = CurrentSurfaceNormal;
-		newForward = newUp.Cross(UpdatedComponent->GetForwardVector().Cross(UpdatedComponent->GetUpVector()));
-		newRight = newUp.Cross(newForward);
-		NewRotation = UKismetMathLibrary::MakeRotationFromAxes(newForward, newRight, newUp);
-	}
-
-	if (!TraceForCurrentGround() && !CanClimbToWall())
-	{
-		NewLocation = UpdatedComponent->GetUpVector() * -1.f * GravityFactor;
-		NewRotation = UpdatedComponent->GetComponentRotation();
-	}
-	
-	FHitResult Hit(1.f);
-	// Todo - @hamza Get Location using a function instead of hardcoded everywhere
-	UpdatedComponent->MoveComponent(NewLocation, NewRotation, true);
-}
-
 #pragma region SpiderMovement
 
 TArray<FHitResult> USpiderMovementComponent::DoCapsuleTraceMultiByObject(const FVector& Start, const FVector& End, bool bShowDebugShape)
 {
 	TArray<FHitResult> OutHitResults;
-	UKismetSystemLibrary::CapsuleTraceMultiForObjects(
+	// Use the capsule trace with Relative Orientation 
+	UTraceUtils::CapsuleTraceMultiForObjects(
 		this,
 		Start,
 		End,
 		SpiderCapsuleTraceRadius,
 		SpiderCapsuleTraceHalfHeight,
+		UpdatedComponent->GetComponentRotation(),
 		SpiderSurfaceTraceTypes,
 		false,
-		TArray<AActor*>({this->GetOwner()}),
+		TArray<AActor*>(),
 		bShowDebugShape? EDrawDebugTrace::ForOneFrame : EDrawDebugTrace::None,
 		OutHitResults,
 		false
@@ -97,13 +55,51 @@ FHitResult USpiderMovementComponent::DoLineTraceSingleByObject(const FVector& St
 }
 #pragma endregion
 #pragma region SpiderMovementCore
+void USpiderMovementComponent::PerformMovement(float DeltaTime)
+{
+	FVector NewLocation;
+	FRotator NewRotation;
+
+	// If a ground trace is successful pawn will continuously try to move towards the ground until collision hits
+	if (TraceForCurrentGround())
+	{
+		NewRotation = GetRotationAlignedToSurface(GroundTraceResult.ImpactNormal);
+		NewLocation = GroundTraceResult.ImpactNormal  * -1.f * GravityFactor; 		
+	}
+
+	// Check if the Pawn is near a wall then calculate Location and Rotation to move to that wall (Override Previous Location and Rotation)
+	if (CanClimbToWall())
+	{
+		// Calculate the correct Values depending on the traced surface e.g ceilings walls etc.
+		ProcessSurfaceInfo();
+		
+		// Todo - @hamza Use Input Vector to decide Interpolation Alpha (Or not because I will be using it for AI?)
+		float ClimbAlpha = GetLastInputVector().Dot(UpdatedComponent->GetForwardVector());
+		NewRotation = GetRotationAlignedToSurface(CurrentSurfaceNormal);
+		NewLocation = CurrentSurfaceLocation * 0.1f;	
+		
+	}
+
+	// Check if the Pawn is not near wall nor near ground, apply gravity
+	if (!TraceForCurrentGround() && !CanClimbToWall())
+	{
+		NewLocation = UpdatedComponent->GetUpVector() * -1.f * GravityFactor;
+		NewRotation = UpdatedComponent->GetComponentRotation();
+	}
+	
+	// Todo - @hamza Get Location using a function instead of hardcoded everywhere	
+	// Todo - @hamza Create A dedicated function for actual movement
+	// Move the component based on the calculated Location and Rotation
+	UpdatedComponent->MoveComponent(NewLocation, FQuat::Slerp(UpdatedComponent->GetComponentQuat(), NewRotation.Quaternion(), DeltaTime * 12.f), true);
+}
+
 bool USpiderMovementComponent::TraceForSurfaces()
 {
 	const FVector Offset = UpdatedComponent->GetForwardVector() * WallTraceStartOffset;
 	const FVector Start = UpdatedComponent->GetComponentLocation() + Offset;
 	const FVector End = Start + UpdatedComponent->GetForwardVector();
 
-	SpiderSurfaceTracedResults = DoCapsuleTraceMultiByObject(Start, End, true);
+	SpiderSurfaceTracedResults = DoCapsuleTraceMultiByObject(Start, End, bDrawDebug);
 	return !SpiderSurfaceTracedResults.IsEmpty();
 }
 
@@ -113,11 +109,10 @@ bool USpiderMovementComponent::TraceForCurrentGround()
 	const FVector UpOffset = (UpdatedComponent->GetUpVector() * GroundTraceDistance);
 	FVector Start = UpdatedComponent->GetComponentLocation() + FwdOffset;
 	Start += UpOffset;
-	//Offset = Offset * FVector(1.f, 1.f, -1.f);
 	FVector End = UpdatedComponent->GetComponentLocation() + FwdOffset;
 	End -= UpOffset;
 
-	GroundTraceResult =  DoLineTraceSingleByObject(Start, End, true);
+	GroundTraceResult =  DoLineTraceSingleByObject(Start, End, bDrawDebug);
 	return GroundTraceResult.bBlockingHit;
 }
 
@@ -142,6 +137,15 @@ void USpiderMovementComponent::ProcessSurfaceInfo()
 	CurrentSurfaceLocation /= SpiderSurfaceTracedResults.Num();
 	CurrentSurfaceNormal = CurrentSurfaceNormal.GetSafeNormal();
 	bWantToClimbWall = true;
+}
+
+FRotator USpiderMovementComponent::GetRotationAlignedToSurface(FVector SurfaceNormal)
+{
+	const FVector newUp = SurfaceNormal;
+	const FVector newForward = newUp.Cross(UpdatedComponent->GetForwardVector().Cross(UpdatedComponent->GetUpVector()));
+	const FVector newRight = newUp.Cross(newForward);
+
+	return UKismetMathLibrary::MakeRotationFromAxes(newForward, newRight, newUp);
 }
 
 bool USpiderMovementComponent::CanClimbToWall() const

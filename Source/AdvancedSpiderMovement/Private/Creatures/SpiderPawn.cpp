@@ -23,7 +23,7 @@ ASpiderPawn::ASpiderPawn()
 	bUseControllerRotationRoll = false;
 #pragma region Collision
 	SphereComponent = CreateDefaultSubobject<USphereComponent>(FName("SphereComponent"));
-	SphereComponent->SetSphereRadius(150.f);
+	SphereComponent->InitSphereRadius(100.f);
 	// SphereComponent->InitBoxExtent(FVector(1000.f, 1000.f, 500.f));
 	SphereComponent->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
 
@@ -31,7 +31,7 @@ ASpiderPawn::ASpiderPawn()
 	SphereComponent->SetShouldUpdatePhysicsVolume(true);
 	SphereComponent->SetCanEverAffectNavigation(false);
 	SphereComponent->bDynamicObstacle = true;
-	RootComponent = SphereComponent;
+	SetRootComponent(SphereComponent);
 #pragma endregion	
 #pragma region SpiderMovementComponent
 	SpiderMovementComponent = CreateDefaultSubobject<USpiderMovementComponent>(FName("SpiderMovementComponent"));
